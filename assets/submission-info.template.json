@@ -1,0 +1,20 @@
+{
+  "_README": "Fill these in. Required: name, url, tagline, short_description, long_description, categories, pricing, email. logo_path (a real local PNG) is required by many directories that block submission without a logo upload.",
+  "name": "Your Tool Name",
+  "url": "https://your-tool.com",
+  "tagline": "One sentence pitch, ~80 characters, no period.",
+  "short_description": "1–2 sentences, ~160 characters. What it does, for whom.",
+  "long_description": "2–4 paragraphs. Problem solved, who it's for, what's unique, key features. Plain text, no markdown.",
+  "categories": ["AI Tools", "Productivity"],
+  "pricing": "Freemium",
+  "pricing_options": "One of: Free, Freemium, Free Trial, Paid, Contact",
+  "logo_url": "https://your-tool.com/logo.png",
+  "logo_path": "/absolute/path/to/logo.png",
+  "screenshot_url": "https://your-tool.com/screenshot.png",
+  "screenshot_path": "/absolute/path/to/screenshot.png",
+  "email": "you@example.com",
+  "twitter": "https://twitter.com/yourhandle",
+  "linkedin": "https://www.linkedin.com/in/yourhandle",
+  "github": "https://github.com/yourhandle",
+  "tags": ["ai", "automation", "workflow"]
+}
