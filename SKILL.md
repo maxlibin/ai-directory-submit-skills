@@ -55,13 +55,23 @@ These are not optional. Ignoring them leads to silent failures that look like su
 
 ### 1. Collect submission info
 
-If the user doesn't already have `submission-info.json`, copy `assets/submission-info.template.json` into their working dir and walk them through:
+**Preferred path: auto-scrape from the tool's URL, then have the user review.** If the user gives a URL and doesn't already have `submission-info.json`:
+
+```bash
+python3 scripts/scrape_metadata.py https://their-tool.com -o <workspace>/submission-info.json --download-logo
+```
+
+This pulls `name`, `tagline`, `short_description`, `long_description`, `pricing`, `logo_url`, social links from the site's HTML + OG/Twitter meta tags, and downloads the logo. Fields it can't infer (categories, email, sometimes logo_path) are written as `TODO:` strings.
+
+**Then walk the user through the TODOs in chat.** Show them the scraped values, ask for the missing ones, write them back. Do not proceed until every `TODO:` is replaced.
+
+If scraping isn't possible (the site is JS-only, blocked, or the user wants to enter data manually), fall back to copying `assets/submission-info.template.json` and asking for each field.
 
 - **Required**: `name`, `url`, `tagline` (≤100 chars), `short_description` (≤200 chars), `long_description`, `categories[]`, `pricing` (Free / Freemium / Free Trial / Paid / Contact), `email`.
 - **Often required**: `logo_path` (an actual local file). Many directories block submission without a logo upload.
 - **Optional**: `twitter`, `linkedin`, `github`, `instagram`, `screenshot_url`.
 
-**Never proceed with the template placeholders** (`"Your Tool Name"` etc.). Filling junk into real directories permanently associates the user's brand with that junk.
+**Never proceed with the template placeholders or `TODO:` strings** (`"Your Tool Name"`, `"TODO: contact email"`, etc.). Filling junk into real directories permanently associates the user's brand with that junk.
 
 ### 2. Fetch the directory list
 
@@ -218,19 +228,41 @@ Required `status` values: `submitted` | `skipped` | `failed` | `unknown`.
 
 ### 5. Live dashboard (recommended — run alongside submissions)
 
+**Primary: terminal live view.** Tell the user to open a second terminal tab and run:
+
+```bash
+python3 scripts/watch.py <workspace>
+```
+
+It uses the alt-screen so it doesn't pollute scrollback, shows a colored status header (submitted / skipped / failed / unknown counts + success rate + elapsed time), a "NOW" panel for the current step, and a table of recent attempts. Auto-refreshes when files change. Ctrl-C to exit.
+
+**To make the "NOW" panel show what's currently happening**, after each meaningful step write `submission-status.json` to the workspace before doing the action:
+
+```bash
+jq -nc --arg d "$DIR_NAME" --arg s "opening submit page" --arg u "$SUBMIT_URL" \
+       --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{directory:$d, step:$s, url:$u, message:"", prompt:"", updated_at:$at}' \
+  > "$WORKSPACE/submission-status.json"
+```
+
+When you need the user to do something (log in, solve a captcha), set `prompt`:
+
+```bash
+jq -nc --arg d "$DIR_NAME" --arg p "Please sign in with Google in the browser, then reply 'continue'." \
+       --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{directory:$d, step:"login wall", url:"", message:"", prompt:$p, updated_at:$at}' \
+  > "$WORKSPACE/submission-status.json"
+```
+
+The `watch.py` dashboard renders `prompt` in a red "NEEDS YOU" banner so it's impossible to miss across tabs.
+
+**Alternative: browser dashboard.** If the user prefers HTML in a browser:
+
 ```bash
 python3 scripts/live_dashboard.py <workspace> --port 8765 --open
 ```
 
-Starts a local HTTP server at `http://127.0.0.1:8765/` that:
-- Auto-refreshes every 2s while the run is in progress
-- Shows source `submission-info.json` in a left sidebar
-- Lists every attempt with status, reason, screenshot thumb, time
-- Clicking a row opens a side-by-side detail panel: source data vs. screenshot of what was actually filled / submitted, so the user can verify each submission visually
-
-Run this in one terminal while submissions happen in another. The user keeps it open in their browser to watch progress live. The dashboard reads `submission-history.json` and `shots/*` from the workspace, so it works for any in-progress or completed run.
-
-For an offline / shareable / archival report, also run `render_report.py` (see step 6) — it produces a self-contained HTML file that doesn't need the server.
+Same data, side-by-side source vs. screenshots, opens at `http://127.0.0.1:8765/`.
 
 ### 6. Render the static HTML report
 
@@ -259,11 +291,13 @@ Suggested chat summary line: `"Submitted to X / Y. Z skipped (paid/login/captcha
 
 | File | Purpose |
 |---|---|
+| `scripts/scrape_metadata.py` | Auto-fills `submission-info.json` from a tool URL (title, descriptions, OG/Twitter meta, logo, social links, pricing hint). Leaves `TODO:` for what it can't infer. |
 | `scripts/fetch_directories.py` | Fetches and parses the best-of-ai README into JSON/JSONL |
 | `scripts/find_submit_link.sh` | Probes common submit paths; falls back to homepage link scan |
 | `scripts/check_submitted.py` | Dedup: exits 0 if `(tool_url, directory_url)` is already handled (submitted or terminal-skipped) |
+| `scripts/watch.py` | **Terminal live dashboard** — alt-screen ANSI, header counts, NOW panel with login/captcha prompts, recent table. Run in a second terminal tab. |
 | `scripts/render_report.py` | Renders `submission-history.json` into a self-contained HTML report |
-| `scripts/live_dashboard.py` | Local HTTP dashboard at `127.0.0.1:8765` — live-updates every 2s, side-by-side source data vs. submission screenshots |
+| `scripts/live_dashboard.py` | Optional browser-based live dashboard at `127.0.0.1:8765` — same data as `watch.py` but in HTML |
 | `scripts/run_batch.sh` | Scout pass / batch runner. `SCOUT_ONLY=1` to only classify walls without filling. `HEADED=1` to show the browser. `INTERACTIVE=1 STATE_FILE=…` for terminal-based login pauses. |
 | `assets/submission-info.template.json` | User-facing template for tool metadata |
 | `references/submission-patterns.md` | Field mappings, what to skip, iframe-form handling, paid-only patterns, ref-invalidation lessons |
@@ -271,20 +305,28 @@ Suggested chat summary line: `"Submitted to X / Y. Z skipped (paid/login/captcha
 ## Quick start
 
 ```bash
-# 1. Sample directories
+# 1. Auto-scrape metadata from the tool URL (user reviews TODOs after)
+python3 scripts/scrape_metadata.py https://their-tool.com \
+  -o /path/to/workspace/submission-info.json --download-logo
+
+# 2. (User opens a second terminal tab and runs the live dashboard)
+python3 scripts/watch.py /path/to/workspace
+
+# 3. Sample directories
 python3 scripts/fetch_directories.py --limit 3 --format json
 
-# 2. Verify submission-info.json is real (not template)
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["name"]!="Your Tool Name", "still template"; print("ok")' \
-  /path/to/submission-info.json
+# 4. Verify submission-info.json has no TODO placeholders left
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
+v=[k for k,v in d.items() if isinstance(v,str) and v.startswith("TODO")];
+assert not v, f"still TODO: {v}"; assert d["name"]!="Your Tool Name"; print("ok")' \
+  /path/to/workspace/submission-info.json
 
-# 3a. Optional: scout pass to classify walls
+# 5a. Optional: scout pass to classify walls
 SCOUT_ONLY=1 bash scripts/run_batch.sh /path/to/workspace 0 1
 
-# 3b. Or: ask Claude to drive each form interactively (recommended)
-# "Open <directory>/submit, snapshot, fill from submission-info.json,
-#  submit, verify, record in history. Ask me when login is needed."
+# 5b. Recommended: Claude drives each form interactively, writing
+#     submission-status.json between steps so the watcher shows live progress.
 
-# 4. Render the report
+# 6. After the run, optionally render the static HTML report
 python3 scripts/render_report.py /path/to/workspace/submission-history.json --open
 ```

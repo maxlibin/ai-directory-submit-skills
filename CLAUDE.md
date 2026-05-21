@@ -9,6 +9,9 @@ The source for the `submit-to-ai-directories` Claude Code skill. The installed c
 ## Common commands
 
 ```bash
+# Auto-scrape tool metadata from a URL into submission-info.json (user reviews TODOs)
+python3 scripts/scrape_metadata.py https://your-tool.com -o ./submission-info.json --download-logo
+
 # List directories from the live best-of-ai README
 python3 scripts/fetch_directories.py --limit 10 --format json
 
@@ -18,7 +21,10 @@ bash scripts/find_submit_link.sh https://example-directory.com
 # Check if a tool was already submitted to a directory
 python3 scripts/check_submitted.py ./submission-history.json https://your-tool.com https://directory.com
 
-# Render an HTML report from a history file
+# Live terminal dashboard (run in a second terminal tab while submissions happen)
+python3 scripts/watch.py /path/to/workspace
+
+# Render an HTML report from a history file (offline / shareable)
 python3 scripts/render_report.py ./submission-history.json --open
 
 # Run the full submission loop unattended (e.g. directories 1–10)
