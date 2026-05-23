@@ -1,4 +1,5 @@
 # submit-to-ai-directories
+<img width="867" height="468" alt="ai-directory-submit" src="https://github.com/user-attachments/assets/a128ac51-7cd9-477d-86a2-8862a5bc6b47" />
 
 A [Claude Code](https://claude.com/claude-code) skill that submits an AI tool to
 ~300 AI tool directories from two curated sources:
