@@ -15,6 +15,13 @@ python3 scripts/scrape_metadata.py https://your-tool.com -o ./submission-info.js
 # List directories from the live best-of-ai README
 python3 scripts/fetch_directories.py --limit 10 --format json
 
+# Filter the live list by catalog access type (no-login / login-required / paid-only / etc.)
+python3 scripts/list_directories.py --access no-login
+python3 scripts/list_directories.py --exclude paid-only,dead,captcha --summary
+
+# Build/update the shared catalog from a submission history
+python3 scripts/build_catalog.py /path/to/workspace/submission-history.json --print-summary
+
 # Resolve a directory's submission URL (tries common paths, then scans homepage via agent-browser)
 bash scripts/find_submit_link.sh https://example-directory.com
 

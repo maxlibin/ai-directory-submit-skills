@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Short launcher for submit-to-ai-directories' watch.py dashboard.
+#
+# Usage:
+#   dirwatch                     # uses the current directory if it looks like a
+#                                #   submission workspace, else /tmp/riggd-test
+#   dirwatch <workspace>         # explicit workspace path
+#   dirwatch --summary           # one-shot full summary, default workspace
+#   dirwatch /path --summary     # one-shot summary on a specific workspace
+#
+# Anything after the workspace (or instead of one) is forwarded to watch.py.
+
+set -e
+
+WATCH_SCRIPT="$HOME/.claude/skills/submit-to-ai-directories/scripts/watch.py"
+if [ ! -f "$WATCH_SCRIPT" ]; then
+  echo "watch.py not found at $WATCH_SCRIPT" >&2
+  exit 1
+fi
+
+# Pick a workspace if the user didn't.
+pick_workspace() {
+  if [ -f "./submission-history.json" ] || [ -f "./submission-info.json" ]; then
+    echo "$PWD"
+  elif [ -d "/tmp/riggd-test" ]; then
+    echo "/tmp/riggd-test"
+  else
+    echo ""
+  fi
+}
+
+# If the first arg is missing OR starts with `-` (a flag), inject a workspace.
+if [ $# -eq 0 ] || [[ "$1" == -* ]]; then
+  WS="$(pick_workspace)"
+  if [ -z "$WS" ]; then
+    echo "no workspace given and none auto-detected" >&2
+    echo "usage: dirwatch [workspace] [--summary] [--interval N]" >&2
+    exit 2
+  fi
+  exec python3 "$WATCH_SCRIPT" "$WS" "$@"
+else
+  exec python3 "$WATCH_SCRIPT" "$@"
+fi

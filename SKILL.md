@@ -79,17 +79,52 @@ If scraping isn't possible (the site is JS-only, blocked, or the user wants to e
 python3 scripts/fetch_directories.py --format json > <workspace>/dirs.json
 ```
 
-Flags: `--limit N`, `--section A` (single letter), `--raw` (dump README). The fetcher drops `github.com/...` entries (those need PRs, not forms). Default scope when the user doesn't specify: ask. Don't assume "all 150".
+**Two sources are merged by default** (~300 unique directories):
+- `github.com/best-of-ai/ai-directories` — bullet list, sectioned A-Z, no submit URLs
+- `github.com/submitaitools/Free-AI-Directories` — table with direct submit URLs + Domain Rating
 
-### 3. Scout pass (optional but recommended for large batches)
+Flags: `--source all|best-of-ai|submitaitools` (default `all`), `--limit N`, `--section A` (best-of-ai only), `--raw` (dump README of single source), `--summary` (counts per source). The fetcher drops `github.com/...` entries (those need PRs, not forms). Default scope when the user doesn't specify: ask. Don't assume "all 300".
+
+When `--source` is `submitaitools` or `all`, each entry includes a `submit_url` field. Use it directly when present — saves the `find_submit_link.sh` probe.
+
+**Catalog-first filtering (recommended for repeat runs).** Once the user has run a submission flow before, a shared catalog lives at `~/.claude/skills/submit-to-ai-directories/data/directory-catalog.json`. It records each directory's *access type* (no-login / login-required / paid-only / captcha / dead / etc.) so you don't have to re-probe them for each new tool.
 
 ```bash
-SCOUT_ONLY=1 bash scripts/run_batch.sh <workspace> 0 1
+# What's worth trying right now without help?
+python3 scripts/list_directories.py --access no-login
+
+# Login queue — present these to the user when they can sign in
+python3 scripts/list_directories.py --access login-required
+
+# Don't waste cycles on these
+python3 scripts/list_directories.py --exclude paid-only,dead,captcha,no-form,off-topic,github-pr-only --uncatalogued
+
+# Get a quick distribution overview
+python3 scripts/list_directories.py --access no-login,login-required --summary
 ```
 
-The scout pass walks every directory, finds the submit URL, detects walls (login / captcha / paid / no-submit-form), and records the outcome in `submission-history.json`. **It does not fill or submit forms.** Use it to triage which directories are even worth attempting before spending time on each.
+When the user says "submit only the no-login ones" or "skip the paid ones", use `list_directories.py` to filter — don't re-test directories whose access type is already known.
 
-Without `SCOUT_ONLY=1`, the script attempts a best-effort heuristic fill — only useful for the simplest standard forms (Tally embeds with `Tool Name` / `Website` / etc. labels). Most directories need the Claude-driven flow in step 4 instead.
+### 3. Scout pass (recommended once per directory list expansion)
+
+Use the dedicated Python scout to probe every *uncatalogued* directory without filling anything. It opens each submit URL, classifies the wall (login / paid / captcha / dead / has-form), and records the outcome. Run it once when the directory list grows or yearly to refresh classifications.
+
+```bash
+# Probe every uncatalogued directory; results land in <workspace>/submission-history.json
+python3 scripts/scout_directories.py <workspace> --resume
+
+# Merge the scout's findings into the shared catalog so all future runs benefit
+python3 scripts/build_catalog.py <workspace>/submission-history.json \
+  --merge ~/.claude/skills/submit-to-ai-directories/data/directory-catalog.json \
+  -o ~/.claude/skills/submit-to-ai-directories/data/directory-catalog.json \
+  --print-summary
+```
+
+The scout adds a `has-form` bucket for directories where it saw a fillable form but couldn't confirm without actually submitting. Those are the next-best target after confirmed `no-login`.
+
+The user can watch progress with `dirwatch <workspace>` in another tab — the scout writes a live status file the dashboard picks up.
+
+The older `SCOUT_ONLY=1 bash scripts/run_batch.sh` mode still exists for backwards compatibility, but `scout_directories.py` is the recommended path: it's faster, parses both sources, handles browser crashes, and writes `submission-status.json` for the dashboard.
 
 ### 4. Per-directory submission loop (Claude drives the browser)
 
@@ -105,6 +140,8 @@ python3 scripts/check_submitted.py <workspace>/submission-history.json "$TOOL_UR
 Handled = `submitted` OR `skipped` with terminal reason (`paid-only`, `github-pr-only`, `email-only`). Retryable = `failed`, `unknown`, `skipped: login-required`, `skipped: captcha`, `skipped: no submit form found` (these may succeed next time with auth state, manual help, or a fresh look).
 
 #### 4b. Resolve the submit URL
+
+If the directory entry already has a `submit_url` (provided by the submitaitools source), use it directly. Otherwise probe:
 
 ```bash
 SUBMIT_URL=$(bash scripts/find_submit_link.sh "$DIR_URL" submitdir 2>/dev/null)
@@ -264,7 +301,17 @@ python3 scripts/live_dashboard.py <workspace> --port 8765 --open
 
 Same data, side-by-side source vs. screenshots, opens at `http://127.0.0.1:8765/`.
 
-### 6. Render the static HTML report
+### 6. Update the catalog
+
+After the run, fold the new findings back into the shared catalog so future runs (with any tool URL) benefit:
+
+```bash
+python3 scripts/build_catalog.py <workspace>/submission-history.json --print-summary
+```
+
+This reads the workspace's history, derives each directory's access type from its `(status, reason)`, and merges into `~/.claude/skills/submit-to-ai-directories/data/directory-catalog.json`. Entries with newer timestamps win; stale `unknown` entries are upgraded if the latest probe was concrete.
+
+### 7. Render the static HTML report
 
 After each directory (so the user can peek mid-run) and at the end:
 
@@ -292,7 +339,10 @@ Suggested chat summary line: `"Submitted to X / Y. Z skipped (paid/login/captcha
 | File | Purpose |
 |---|---|
 | `scripts/scrape_metadata.py` | Auto-fills `submission-info.json` from a tool URL (title, descriptions, OG/Twitter meta, logo, social links, pricing hint). Leaves `TODO:` for what it can't infer. |
-| `scripts/fetch_directories.py` | Fetches and parses the best-of-ai README into JSON/JSONL |
+| `scripts/fetch_directories.py` | Fetches and parses both `best-of-ai/ai-directories` and `submitaitools/Free-AI-Directories` (merged + deduplicated). Records carry `source`, `submit_url` (when known), and `domain_rating`. |
+| `scripts/list_directories.py` | **Filter the live directory list by catalog access type** (no-login / has-form / login-required / paid-only / etc.). Lets the user say "submit only no-login and has-form" without re-probing. |
+| `scripts/build_catalog.py` | Builds / merges the shared catalog from submission histories. Run after each batch to fold new findings back into `~/.claude/skills/submit-to-ai-directories/data/directory-catalog.json`. |
+| `scripts/scout_directories.py` | **Scout-only classifier** — opens every uncatalogued directory, detects the wall (login / paid / captcha / dead / has-form), records the outcome. No forms filled. Run after the directory list grows. |
 | `scripts/find_submit_link.sh` | Probes common submit paths; falls back to homepage link scan |
 | `scripts/check_submitted.py` | Dedup: exits 0 if `(tool_url, directory_url)` is already handled (submitted or terminal-skipped) |
 | `scripts/watch.py` | **Terminal live dashboard** — alt-screen ANSI, header counts, NOW panel with login/captcha prompts, recent table. Run in a second terminal tab. |
